@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="92" fill="#4A90D9"/>
+  <!-- Column 1 -->
+  <rect x="56" y="97" width="118" height="318" rx="20" fill="rgba(255,255,255,0.95)"/>
+  <!-- Column 2 -->
+  <rect x="197" y="97" width="118" height="318" rx="20" fill="rgba(255,255,255,0.95)"/>
+  <!-- Column 3 -->
+  <rect x="338" y="97" width="118" height="318" rx="20" fill="rgba(255,255,255,0.95)"/>
+  <!-- Cards col 1 -->
+  <rect x="69" y="113" width="92" height="36" rx="8" fill="#4A90D9"/>
+  <rect x="69" y="158" width="92" height="36" rx="8" fill="#93C5E8"/>
+  <rect x="69" y="203" width="72" height="36" rx="8" fill="#C7E1F4"/>
+  <!-- Cards col 2 -->
+  <rect x="210" y="113" width="92" height="36" rx="8" fill="#4A90D9"/>
+  <rect x="210" y="158" width="92" height="36" rx="8" fill="#93C5E8"/>
+  <!-- Cards col 3 -->
+  <rect x="351" y="113" width="92" height="36" rx="8" fill="#4A90D9"/>
+</svg>

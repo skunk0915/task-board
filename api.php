@@ -23,6 +23,38 @@ try {
     exit;
 }
 
+// ── 自動マイグレーション ────────────────────────────────
+(function() use ($pdo) {
+    // tasks: estimated_hours / actual_hours / is_done
+    $cols = $pdo->query("SHOW COLUMNS FROM tasks")->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('estimated_hours', $cols)) {
+        $pdo->exec("ALTER TABLE tasks ADD COLUMN estimated_hours DECIMAL(5,1) DEFAULT NULL");
+    }
+    if (!in_array('actual_hours', $cols)) {
+        $pdo->exec("ALTER TABLE tasks ADD COLUMN actual_hours DECIMAL(5,1) DEFAULT 0");
+    }
+    if (!in_array('is_done', $cols)) {
+        $pdo->exec("ALTER TABLE tasks ADD COLUMN is_done TINYINT(1) NOT NULL DEFAULT 0");
+    }
+    // daily_plans
+    $pdo->exec("CREATE TABLE IF NOT EXISTS daily_plans (
+        id              INT AUTO_INCREMENT PRIMARY KEY,
+        plan_date       DATE NOT NULL,
+        available_hours DECIMAL(5,1) NOT NULL DEFAULT 8.0,
+        UNIQUE KEY uk_date (plan_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // daily_task_plans
+    $pdo->exec("CREATE TABLE IF NOT EXISTS daily_task_plans (
+        id            INT AUTO_INCREMENT PRIMARY KEY,
+        plan_date     DATE NOT NULL,
+        task_id       INT NOT NULL,
+        planned_hours DECIMAL(5,1) NOT NULL DEFAULT 1.0,
+        sort_order    INT NOT NULL DEFAULT 0,
+        UNIQUE KEY uk_date_task (plan_date, task_id),
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+})();
+
 // 入力
 $input  = json_decode(file_get_contents('php://input'), true) ?? [];
 $action = $_GET['action'] ?? ($input['action'] ?? '');
@@ -96,30 +128,44 @@ switch ($action) {
     // ── タスク CRUD ──────────────────────────────────────
     case 'create_task':
         if ($err = requireFields($input, ['project_id','name'])) { badReq($err); break; }
-        $pid    = (int)$input['project_id'];
-        $name   = trim($input['name']);
-        $desc   = trim($input['description'] ?? '');
+        $pid      = (int)$input['project_id'];
+        $name     = trim($input['name']);
+        $desc     = trim($input['description'] ?? '');
         $start    = validDate($input['start_date'] ?? '');
         $end      = validDate($input['end_date'] ?? '');
         $progress = max(0, min(100, (int)($input['progress'] ?? 0)));
+        $estH     = (isset($input['estimated_hours']) && $input['estimated_hours'] !== '')
+                    ? max(0, (float)$input['estimated_hours']) : null;
+        $actH     = max(0, (float)($input['actual_hours'] ?? 0));
         $maxStmt  = $pdo->prepare("SELECT COALESCE(MAX(position),0)+1 FROM tasks WHERE project_id=?");
         $maxStmt->execute([$pid]);
         $pos = (int)$maxStmt->fetchColumn();
-        $pdo->prepare("INSERT INTO tasks (project_id,name,description,start_date,end_date,progress,position) VALUES (?,?,?,?,?,?,?)")
-            ->execute([$pid, $name, $desc, $start, $end, $progress, $pos]);
+        $pdo->prepare("INSERT INTO tasks (project_id,name,description,start_date,end_date,progress,position,estimated_hours,actual_hours) VALUES (?,?,?,?,?,?,?,?,?)")
+            ->execute([$pid, $name, $desc, $start, $end, $progress, $pos, $estH, $actH]);
         echo json_encode(['id' => (int)$pdo->lastInsertId()]);
         break;
 
     case 'update_task':
         if ($err = requireFields($input, ['id','name'])) { badReq($err); break; }
-        $id     = (int)$input['id'];
-        $name   = trim($input['name']);
-        $desc   = trim($input['description'] ?? '');
+        $id       = (int)$input['id'];
+        $name     = trim($input['name']);
+        $desc     = trim($input['description'] ?? '');
         $start    = validDate($input['start_date'] ?? '');
         $end      = validDate($input['end_date'] ?? '');
         $progress = max(0, min(100, (int)($input['progress'] ?? 0)));
-        $pdo->prepare("UPDATE tasks SET name=?,description=?,start_date=?,end_date=?,progress=? WHERE id=?")
-            ->execute([$name, $desc, $start, $end, $progress, $id]);
+        $estH     = (isset($input['estimated_hours']) && $input['estimated_hours'] !== '')
+                    ? max(0, (float)$input['estimated_hours']) : null;
+        $actH     = max(0, (float)($input['actual_hours'] ?? 0));
+        $pdo->prepare("UPDATE tasks SET name=?,description=?,start_date=?,end_date=?,progress=?,estimated_hours=?,actual_hours=? WHERE id=?")
+            ->execute([$name, $desc, $start, $end, $progress, $estH, $actH, $id]);
+        echo json_encode(['ok' => true]);
+        break;
+
+    case 'toggle_task_done':
+        $id     = (int)($input['id'] ?? 0);
+        $isDone = isset($input['is_done']) ? ((int)$input['is_done'] ? 1 : 0) : 0;
+        if (!$id) { badReq('id required'); break; }
+        $pdo->prepare("UPDATE tasks SET is_done=? WHERE id=?")->execute([$isDone, $id]);
         echo json_encode(['ok' => true]);
         break;
 
@@ -137,6 +183,86 @@ switch ($action) {
         $stmt = $pdo->prepare("UPDATE tasks SET position=? WHERE id=? AND project_id=?");
         foreach ($order as $pos => $tid) {
             $stmt->execute([$pos, (int)$tid, $pid]);
+        }
+        echo json_encode(['ok' => true]);
+        break;
+
+    // ── 今日の作業計画 ─────────────────────────────────────
+    case 'get_daily_plan':
+        $date = validDate($_GET['date'] ?? '');
+        if (!$date) $date = date('Y-m-d');
+        $stmt = $pdo->prepare("SELECT available_hours FROM daily_plans WHERE plan_date=?");
+        $stmt->execute([$date]);
+        $plan = $stmt->fetch();
+        $available = $plan ? (float)$plan['available_hours'] : 8.0;
+        $stmt = $pdo->prepare("
+            SELECT dtp.task_id, dtp.planned_hours, dtp.sort_order,
+                   t.name, t.progress, t.estimated_hours, t.actual_hours, t.project_id
+            FROM daily_task_plans dtp
+            JOIN tasks t ON t.id = dtp.task_id
+            WHERE dtp.plan_date = ?
+            ORDER BY dtp.sort_order, dtp.id
+        ");
+        $stmt->execute([$date]);
+        $taskPlans = $stmt->fetchAll();
+        foreach ($taskPlans as &$tp) {
+            $tp['task_id']        = (int)$tp['task_id'];
+            $tp['planned_hours']  = (float)$tp['planned_hours'];
+            $tp['progress']       = (int)$tp['progress'];
+            $tp['estimated_hours']= $tp['estimated_hours'] !== null ? (float)$tp['estimated_hours'] : null;
+            $tp['actual_hours']   = (float)($tp['actual_hours'] ?? 0);
+            $tp['project_id']     = (int)$tp['project_id'];
+        }
+        echo json_encode(['date' => $date, 'available_hours' => $available, 'task_plans' => $taskPlans]);
+        break;
+
+    case 'save_daily_available_hours':
+        $date  = validDate($input['date'] ?? '');
+        if (!$date) { badReq('invalid date'); break; }
+        $hours = max(0.5, min(24, (float)($input['available_hours'] ?? 8)));
+        $pdo->prepare("INSERT INTO daily_plans (plan_date,available_hours) VALUES (?,?) ON DUPLICATE KEY UPDATE available_hours=?")
+            ->execute([$date, $hours, $hours]);
+        echo json_encode(['ok' => true]);
+        break;
+
+    case 'add_task_to_daily_plan':
+        $date   = validDate($input['date'] ?? '');
+        $taskId = (int)($input['task_id'] ?? 0);
+        $hours  = max(0.5, min(24, (float)($input['planned_hours'] ?? 1)));
+        if (!$date || !$taskId) { badReq('invalid params'); break; }
+        $stmt = $pdo->prepare("SELECT COALESCE(MAX(sort_order),0)+1 FROM daily_task_plans WHERE plan_date=?");
+        $stmt->execute([$date]);
+        $sortOrd = (int)$stmt->fetchColumn();
+        $pdo->prepare("INSERT INTO daily_task_plans (plan_date,task_id,planned_hours,sort_order) VALUES (?,?,?,?) ON DUPLICATE KEY UPDATE planned_hours=?")
+            ->execute([$date, $taskId, $hours, $sortOrd, $hours]);
+        echo json_encode(['ok' => true]);
+        break;
+
+    case 'remove_task_from_daily_plan':
+        $date   = validDate($input['date'] ?? '');
+        $taskId = (int)($input['task_id'] ?? 0);
+        if (!$date || !$taskId) { badReq('invalid params'); break; }
+        $pdo->prepare("DELETE FROM daily_task_plans WHERE plan_date=? AND task_id=?")->execute([$date, $taskId]);
+        echo json_encode(['ok' => true]);
+        break;
+
+    case 'update_daily_task_hours':
+        $date   = validDate($input['date'] ?? '');
+        $taskId = (int)($input['task_id'] ?? 0);
+        $hours  = max(0.5, min(24, (float)($input['planned_hours'] ?? 1)));
+        if (!$date || !$taskId) { badReq('invalid params'); break; }
+        $pdo->prepare("UPDATE daily_task_plans SET planned_hours=? WHERE plan_date=? AND task_id=?")
+            ->execute([$hours, $date, $taskId]);
+        echo json_encode(['ok' => true]);
+        break;
+
+    case 'update_daily_plan_order':
+        $date  = validDate($input['date'] ?? '');
+        $order = $input['order'] ?? [];
+        if (!$date || !is_array($order)) { badReq('invalid'); break; }
+        $stmt = $pdo->prepare("UPDATE daily_task_plans SET sort_order=? WHERE plan_date=? AND task_id=?");
+        foreach ($order as $pos => $tid) {
+            $stmt->execute([$pos, $date, (int)$tid]);
         }
         echo json_encode(['ok' => true]);
         break;

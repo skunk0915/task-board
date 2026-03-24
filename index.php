@@ -4,6 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>タスクボード</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#4A90D9">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="タスクボード">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -15,6 +23,30 @@
   </div>
   <button class="btn btn-primary" id="addProjectBtn">＋ プロジェクト追加</button>
 </header>
+
+<!-- ====== 今日の作業計画 ====== -->
+<section class="daily-plan" id="dailyPlan">
+  <div class="daily-plan-header">
+    <div class="dp-title-row">
+      <span class="dp-icon">📅</span>
+      <span class="dp-title">今日の作業計画</span>
+      <span class="dp-date" id="dpDate"></span>
+    </div>
+    <div class="dp-controls">
+      <label class="dp-ctrl-label" for="availableHours">利用可能時間</label>
+      <input type="number" class="dp-hours-input" id="availableHours" min="0.5" max="24" step="0.5" value="8">
+      <span class="dp-ctrl-unit">h</span>
+      <button class="dp-toggle-btn" id="dpToggleBtn" title="折りたたむ">▲</button>
+    </div>
+  </div>
+  <div class="dp-body" id="dpBody">
+    <div class="dp-drop-zone" id="dpDropZone">
+      <div class="dp-tasks-list" id="dpTasksList"></div>
+      <div class="dp-drop-hint" id="dpDropHint">タスクカードをここにドラッグして追加</div>
+    </div>
+    <div class="dp-bar-area" id="dpBarArea"></div>
+  </div>
+</section>
 
 <main class="board" id="board">
   <div class="board-loading" id="boardLoading">
@@ -90,6 +122,22 @@
         <label for="taskProgress">進捗 <span id="taskProgressLabel">0</span>%</label>
         <input type="range" id="taskProgress" min="0" max="100" step="5" value="0">
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="taskEstimatedHours">所要予定時間</label>
+          <div class="input-with-unit">
+            <input type="number" id="taskEstimatedHours" min="0" max="9999" step="0.5" placeholder="未設定">
+            <span class="input-unit">h</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="taskActualHours">累積作業時間</label>
+          <div class="input-with-unit">
+            <input type="number" id="taskActualHours" min="0" max="9999" step="0.5" value="0">
+            <span class="input-unit">h</span>
+          </div>
+        </div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-danger" id="deleteTaskBtn" style="display:none;margin-right:auto">🗑 削除</button>
@@ -117,5 +165,10 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 <script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js');
+  }
+</script>
 </body>
 </html>

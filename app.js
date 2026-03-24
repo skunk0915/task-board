@@ -19,6 +19,7 @@ const LS = {
   TASK_ORDER:   'tb_task_order',    // { [projectId]: [taskId, ...] }
   SORT_MODE:    'tb_sort_mode',     // { [projectId]: 'manual'|'date'|'status' }
   PROJECT_ORDER:'tb_project_order', // [projectId, ...]
+  HIDE_DONE:    'tb_hide_done',     // { [projectId]: true/false }
 };
 
 /* ============================================================
@@ -26,6 +27,18 @@ const LS = {
    ============================================================ */
 let projects   = [];      // サーバーから取得したデータ
 let sortables  = {};      // SortableJS インスタンス
+
+// 今日の日付 (YYYY-MM-DD)
+const TODAY = (() => {
+  const d = new Date();
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+})();
+
+let dailyPlan = { date: TODAY, available_hours: 8, task_plans: [] };
+let dailySortable = null;
+let dpCollapsed = false;
 
 /* ============================================================
    ローカルストレージ ヘルパー
@@ -157,7 +170,24 @@ function render() {
         dragClass:   'sortable-drag',
         handle:      '.task-drag-handle',
         filter:      '.task-empty',
-        onEnd() {
+        onEnd(evt) {
+          // 今日の計画エリアにドロップされたか座標で判定
+          const zone = document.getElementById('dpDropZone');
+          const dpBody = document.getElementById('dpBody');
+          if (zone && dpBody && !dpBody.classList.contains('dp-collapsed')) {
+            const r  = zone.getBoundingClientRect();
+            const oe = evt.originalEvent || {};
+            // clientX/Y が 0,0 の場合は changedTouches をフォールバック
+            const cx = oe.clientX || 0;
+            const cy = oe.clientY || 0;
+            if (cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom) {
+              zone.classList.remove('dp-drag-over');
+              addTaskToDailyPlan(parseInt(evt.item.dataset.tid));
+              return;
+            }
+          }
+          zone && zone.classList.remove('dp-drag-over');
+          // 通常の並び替え
           const ids   = [...listEl.querySelectorAll('.task-card')].map(el => el.dataset.tid);
           const store = ls.obj(LS.TASK_ORDER);
           store[String(pid)] = ids;
@@ -182,10 +212,18 @@ function render() {
 }
 
 function buildProjectCol(project, tasks, mode) {
-  const pid = project.id;
+  const pid      = project.id;
+  const hideDone = ls.obj(LS.HIDE_DONE)[String(pid)] || false;
+  const doneCnt  = tasks.filter(t => t.is_done).length;
+  const visibleTasks = hideDone ? tasks.filter(t => !t.is_done) : tasks;
+
   const col = document.createElement('div');
   col.className   = 'project-col';
   col.dataset.pid = pid;
+
+  const doneFilterBtn = doneCnt > 0
+    ? `<button class="sort-btn done-filter-btn${hideDone ? ' active' : ''}" data-pid="${pid}">完了${doneCnt}件${hideDone ? '▶' : '▼'}</button>`
+    : '';
 
   col.innerHTML = `
     <div class="project-header" style="border-top-color:${esc(project.color)}">
@@ -193,7 +231,7 @@ function buildProjectCol(project, tasks, mode) {
         <div class="project-title-row">
           <span class="proj-drag-handle" title="ドラッグして移動">⠿</span>
           <span class="project-name" title="${esc(project.name)}">${esc(project.name)}</span>
-          <span class="task-count-badge">${tasks.length}</span>
+          <span class="task-count-badge">${visibleTasks.length}</span>
         </div>
         <div class="project-actions">
           <button class="icon-btn edit-proj-btn"  data-pid="${pid}" title="編集">✏️</button>
@@ -204,13 +242,14 @@ function buildProjectCol(project, tasks, mode) {
         <button class="sort-btn ${mode==='manual' ?'active':''}" data-pid="${pid}" data-mode="manual">手動</button>
         <button class="sort-btn ${mode==='date'   ?'active':''}" data-pid="${pid}" data-mode="date">開始日</button>
         <button class="sort-btn ${mode==='status' ?'active':''}" data-pid="${pid}" data-mode="status">進捗</button>
+        ${doneFilterBtn}
       </div>
     </div>
 
     <div class="task-list" id="tl-${pid}">
-      ${tasks.length === 0
+      ${visibleTasks.length === 0
         ? '<div class="task-empty">タスクなし</div>'
-        : tasks.map(buildTaskCard).join('')}
+        : visibleTasks.map(buildTaskCard).join('')}
     </div>
 
     <button class="add-task-btn add-task-btn-js" data-pid="${pid}">＋ タスク追加</button>
@@ -219,23 +258,40 @@ function buildProjectCol(project, tasks, mode) {
   // イベント委譲（列内）
   col.querySelector('.edit-proj-btn').addEventListener('click', () => openEditProject(pid));
   col.querySelector('.del-proj-btn').addEventListener('click', () => confirmDeleteProject(pid));
-  col.querySelectorAll('.sort-btn').forEach(btn =>
+  col.querySelectorAll('.sort-btn:not(.done-filter-btn)').forEach(btn =>
     btn.addEventListener('click', () => setSortMode(pid, btn.dataset.mode))
   );
+  col.querySelector('.done-filter-btn')?.addEventListener('click', () => toggleHideDone(pid));
   col.querySelector('.add-task-btn-js').addEventListener('click', () => openAddTask(pid));
   col.querySelectorAll('.task-card').forEach(card =>
     card.addEventListener('click', () => openEditTask(Number(card.dataset.tid)))
+  );
+  col.querySelectorAll('.task-done-btn').forEach(btn =>
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleTaskDone(Number(btn.dataset.tid));
+    })
   );
 
   return col;
 }
 
 function buildTaskCard(task) {
-  const pct   = task.progress ?? 0;
-  const color = progressColor(pct);
+  const isDone = !!task.is_done;
+  const pct    = task.progress ?? 0;
+  const color  = isDone ? '#94a3b8' : progressColor(pct);
+  const estH   = task.estimated_hours != null ? parseFloat(task.estimated_hours) : null;
+  const actH   = parseFloat(task.actual_hours ?? 0);
+  const timeInfo = (estH != null || actH > 0)
+    ? `<div class="task-time-info">
+        ${estH != null ? `<span class="task-est-h" title="所要予定時間">予${estH}h</span>` : ''}
+        ${actH > 0    ? `<span class="task-act-h" title="累積作業時間">実${actH}h</span>` : ''}
+       </div>`
+    : '';
   return `
-    <div class="task-card" data-tid="${task.id}">
-      <span class="task-drag-handle" title="ドラッグして並べ替え">⠿</span>
+    <div class="task-card${isDone ? ' is-done' : ''}" data-tid="${task.id}">
+      <span class="task-drag-handle" title="ドラッグして並べ替え / 今日の計画へ">⠿</span>
+      <button class="task-done-btn${isDone ? ' done' : ''}" data-tid="${task.id}" title="${isDone ? '完了を解除' : '完了にする'}">✓</button>
       <div class="task-card-body">
         <div class="task-name">${esc(task.name)}</div>
         <div class="task-meta">
@@ -247,6 +303,7 @@ function buildTaskCard(task) {
             <span class="progress-pct">${pct}%</span>
           </div>
         </div>
+        ${timeInfo}
       </div>
     </div>
   `;
@@ -259,6 +316,36 @@ function setSortMode(projectId, mode) {
   const modes = ls.obj(LS.SORT_MODE);
   modes[String(projectId)] = mode;
   ls.set(LS.SORT_MODE, modes);
+  render();
+}
+
+/* ============================================================
+   タスク完了フラグ切替
+   ============================================================ */
+async function toggleTaskDone(tid) {
+  let task = null;
+  for (const p of projects) {
+    task = (p.tasks || []).find(t => t.id == tid);
+    if (task) break;
+  }
+  if (!task) return;
+  const newDone = task.is_done ? 0 : 1;
+  try {
+    await api({ action: 'toggle_task_done', id: tid, is_done: newDone });
+    task.is_done = newDone;
+    render();
+  } catch (e) {
+    console.warn('toggle done failed:', e);
+  }
+}
+
+/* ============================================================
+   プロジェクト単位の完了タスク 表示/非表示
+   ============================================================ */
+function toggleHideDone(pid) {
+  const map = ls.obj(LS.HIDE_DONE);
+  map[String(pid)] = !map[String(pid)];
+  ls.set(LS.HIDE_DONE, map);
   render();
 }
 
@@ -336,12 +423,14 @@ function syncColorPicker(color) {
    タスク モーダル
    ============================================================ */
 function openAddTask(pid) {
-  document.getElementById('taskId').value          = '';
-  document.getElementById('taskProjectId').value   = pid;
-  document.getElementById('taskName').value        = '';
-  document.getElementById('taskDescription').value = '';
-  document.getElementById('taskStartDate').value   = '';
-  document.getElementById('taskEndDate').value     = '';
+  document.getElementById('taskId').value             = '';
+  document.getElementById('taskProjectId').value      = pid;
+  document.getElementById('taskName').value           = '';
+  document.getElementById('taskDescription').value    = '';
+  document.getElementById('taskStartDate').value      = '';
+  document.getElementById('taskEndDate').value        = '';
+  document.getElementById('taskEstimatedHours').value = '';
+  document.getElementById('taskActualHours').value    = '0';
   setProgressSlider(0);
   document.getElementById('taskModalTitle').textContent = 'タスク追加';
   document.getElementById('deleteTaskBtn').style.display = 'none';
@@ -357,12 +446,14 @@ function openEditTask(tid) {
   }
   if (!task) return;
 
-  document.getElementById('taskId').value          = task.id;
-  document.getElementById('taskProjectId').value   = task.project_id;
-  document.getElementById('taskName').value        = task.name;
-  document.getElementById('taskDescription').value = task.description || '';
-  document.getElementById('taskStartDate').value   = task.start_date  || '';
-  document.getElementById('taskEndDate').value     = task.end_date    || '';
+  document.getElementById('taskId').value             = task.id;
+  document.getElementById('taskProjectId').value      = task.project_id;
+  document.getElementById('taskName').value           = task.name;
+  document.getElementById('taskDescription').value    = task.description || '';
+  document.getElementById('taskStartDate').value      = task.start_date  || '';
+  document.getElementById('taskEndDate').value        = task.end_date    || '';
+  document.getElementById('taskEstimatedHours').value = task.estimated_hours != null ? task.estimated_hours : '';
+  document.getElementById('taskActualHours').value    = task.actual_hours ?? 0;
   setProgressSlider(task.progress ?? 0);
   document.getElementById('taskModalTitle').textContent = 'タスク編集';
   document.getElementById('deleteTaskBtn').style.display = '';
@@ -371,23 +462,27 @@ function openEditTask(tid) {
 }
 
 async function saveTask() {
-  const id          = document.getElementById('taskId').value;
-  const projectId   = document.getElementById('taskProjectId').value;
-  const name        = document.getElementById('taskName').value.trim();
-  const description = document.getElementById('taskDescription').value.trim();
-  const start_date  = document.getElementById('taskStartDate').value;
-  const end_date    = document.getElementById('taskEndDate').value;
-  const progress    = Number(document.getElementById('taskProgress').value);
+  const id             = document.getElementById('taskId').value;
+  const projectId      = document.getElementById('taskProjectId').value;
+  const name           = document.getElementById('taskName').value.trim();
+  const description    = document.getElementById('taskDescription').value.trim();
+  const start_date     = document.getElementById('taskStartDate').value;
+  const end_date       = document.getElementById('taskEndDate').value;
+  const progress       = Number(document.getElementById('taskProgress').value);
+  const estVal         = document.getElementById('taskEstimatedHours').value;
+  const estimated_hours = estVal !== '' ? parseFloat(estVal) : '';
+  const actual_hours   = parseFloat(document.getElementById('taskActualHours').value) || 0;
 
   if (!name) { alert('タスク名を入力してください'); return; }
   try {
     if (id) {
-      await api({ action: 'update_task', id, name, description, start_date, end_date, progress });
+      await api({ action: 'update_task', id, name, description, start_date, end_date, progress, estimated_hours, actual_hours });
     } else {
-      await api({ action: 'create_task', project_id: projectId, name, description, start_date, end_date, progress });
+      await api({ action: 'create_task', project_id: projectId, name, description, start_date, end_date, progress, estimated_hours, actual_hours });
     }
     closeModal('taskModal');
     await loadProjects();
+    await loadDailyPlan(); // 今日の計画バーも更新
   } catch (e) {
     alert('保存失敗: ' + e.message);
   }
@@ -402,6 +497,7 @@ async function deleteTask() {
     await api({ action: 'delete_task', id });
     closeModal('taskModal');
     await loadProjects();
+    await loadDailyPlan();
   } catch (e) {
     alert('削除失敗: ' + e.message);
   }
@@ -446,6 +542,202 @@ function openModal(id)  { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 /* ============================================================
+   今日の作業計画
+   ============================================================ */
+async function loadDailyPlan() {
+  try {
+    const data = await apiGet(`get_daily_plan&date=${TODAY}`);
+    dailyPlan.available_hours = parseFloat(data.available_hours) || 8;
+    dailyPlan.task_plans = data.task_plans || [];
+  } catch (e) {
+    console.warn('daily plan load failed:', e);
+  }
+  renderDailyPlan();
+}
+
+function renderDailyPlan() {
+  // 日付表示
+  const [y, m, d] = TODAY.split('-');
+  document.getElementById('dpDate').textContent = `${y}/${m}/${d}`;
+
+  // 利用可能時間
+  document.getElementById('availableHours').value = dailyPlan.available_hours;
+
+  // タスクリスト
+  const list = document.getElementById('dpTasksList');
+  list.innerHTML = '';
+  const hint = document.getElementById('dpDropHint');
+
+  if (dailyPlan.task_plans.length === 0) {
+    hint.style.display = 'flex';
+  } else {
+    hint.style.display = 'none';
+    dailyPlan.task_plans.forEach(tp => list.appendChild(buildDpTaskItem(tp)));
+  }
+
+  renderDpBar();
+  setupDailySortable();
+}
+
+function buildDpTaskItem(tp) {
+  const project = projects.find(p => p.id == tp.project_id);
+  const color   = project ? project.color : '#4A90D9';
+  const projName = project ? project.name : '';
+  const hours   = parseFloat(tp.planned_hours);
+
+  const item = document.createElement('div');
+  item.className   = 'dp-task-item';
+  item.dataset.tid = tp.task_id;
+  item.style.setProperty('--proj-color', color);
+  item.innerHTML = `
+    <span class="dp-task-info">
+      <span class="dp-task-proj">${esc(projName)}</span>
+      <span class="dp-task-name">${esc(tp.name)}</span>
+    </span>
+    <input type="number" class="dp-task-hours-inp" value="${hours}" min="0.5" max="24" step="0.5" title="今日の作業時間">
+    <span class="dp-task-unit">h</span>
+    <button class="dp-task-remove" title="削除">✕</button>
+  `;
+
+  item.querySelector('.dp-task-hours-inp').addEventListener('change', async (e) => {
+    const h = Math.max(0.5, parseFloat(e.target.value) || 0.5);
+    e.target.value = h;
+    tp.planned_hours = h;
+    try {
+      await api({ action: 'update_daily_task_hours', date: TODAY, task_id: tp.task_id, planned_hours: h });
+    } catch {}
+    renderDpBar();
+  });
+
+  item.querySelector('.dp-task-remove').addEventListener('click', async () => {
+    try {
+      await api({ action: 'remove_task_from_daily_plan', date: TODAY, task_id: tp.task_id });
+      await loadDailyPlan();
+    } catch {}
+  });
+
+  return item;
+}
+
+function calcExpectedProgress(currentPct, estHours, todayHours) {
+  if (!estHours || estHours <= 0) return currentPct;
+  return Math.min(100, Math.round(currentPct + (todayHours / estHours) * 100));
+}
+
+function renderDpBar() {
+  const area      = document.getElementById('dpBarArea');
+  const available = dailyPlan.available_hours;
+  const tasks     = dailyPlan.task_plans;
+
+  if (tasks.length === 0) {
+    area.innerHTML = '';
+    return;
+  }
+
+  const totalPlanned = tasks.reduce((s, t) => s + parseFloat(t.planned_hours), 0);
+  const scale        = Math.max(totalPlanned, available);
+  const overTime     = totalPlanned > available;
+
+  let segments = '';
+  tasks.forEach(tp => {
+    const project    = projects.find(p => p.id == tp.project_id);
+    const color      = project ? project.color : '#4A90D9';
+    const ph         = parseFloat(tp.planned_hours);
+    const widthPct   = (ph / scale) * 100;
+    const curPct     = parseInt(tp.progress) || 0;
+    const estH       = tp.estimated_hours != null ? parseFloat(tp.estimated_hours) : null;
+    const actH       = parseFloat(tp.actual_hours || 0);
+    const newPct     = calcExpectedProgress(curPct, estH, ph);
+    const hasEst     = estH != null && estH > 0;
+
+    const progressChange = hasEst
+      ? `<div class="dp-callout-progress">
+           <span class="dp-callout-cur">${curPct}%</span>
+           <span class="dp-callout-arrow">→</span>
+           <span class="dp-callout-new">${newPct}%</span>
+         </div>`
+      : `<div class="dp-callout-progress dp-callout-no-est">進捗予測には所要予定時間を設定してください</div>`;
+
+    const hoursRow = `<div class="dp-callout-hours">今日: ${ph}h${hasEst ? ` / 予定: ${estH}h` : ''}${actH > 0 ? ` / 累積: ${actH}h` : ''}</div>`;
+
+    segments += `
+      <div class="dp-bar-seg" style="width:${widthPct.toFixed(2)}%;background:${esc(color)}" data-tid="${tp.task_id}">
+        <div class="dp-callout">
+          <div class="dp-callout-name">${esc(tp.name)}</div>
+          ${progressChange}
+          ${hoursRow}
+        </div>
+      </div>`;
+  });
+
+  // 余り時間
+  if (available > totalPlanned) {
+    const remPct = ((available - totalPlanned) / scale) * 100;
+    segments += `<div class="dp-bar-seg dp-bar-rem" style="width:${remPct.toFixed(2)}%">
+      <div class="dp-callout dp-callout-rem">
+        <div class="dp-callout-name">空き時間: ${(available - totalPlanned).toFixed(1)}h</div>
+      </div>
+    </div>`;
+  }
+
+  const overWarn = overTime
+    ? `<span class="dp-over-warn">⚠️ 計画 ${totalPlanned.toFixed(1)}h が利用可能時間 ${available}h を超えています</span>`
+    : `<span class="dp-time-summary">計画 ${totalPlanned.toFixed(1)}h / 利用可能 ${available}h（余り ${Math.max(0, available - totalPlanned).toFixed(1)}h）</span>`;
+
+  area.innerHTML = `
+    <div class="dp-bar-wrap">
+      <div class="dp-bar">${segments}</div>
+      <div class="dp-bar-footer">${overWarn}</div>
+    </div>
+  `;
+}
+
+function setupDailySortable() {
+  if (dailySortable) { try { dailySortable.destroy(); } catch {} dailySortable = null; }
+
+  const list = document.getElementById('dpTasksList');
+  if (list.children.length === 0) return;
+
+  dailySortable = new Sortable(list, {
+    animation: 150,
+    ghostClass: 'sortable-ghost',
+    onEnd() {
+      const ids = [...list.querySelectorAll('.dp-task-item')].map(el => el.dataset.tid);
+      dailyPlan.task_plans = ids.map(id =>
+        dailyPlan.task_plans.find(tp => String(tp.task_id) === String(id))
+      ).filter(Boolean);
+      api({ action: 'update_daily_plan_order', date: TODAY, order: ids }).catch(() => {});
+      renderDpBar();
+    },
+  });
+}
+
+function initDpDropZone() {
+  // ドラッグ中のビジュアルフィードバックのみ
+  // 実際のドロップ判定は SortableJS onEnd の座標チェックで行う
+  const zone = document.getElementById('dpDropZone');
+  zone.addEventListener('dragover', e => {
+    e.preventDefault(); // ドロップ許可（カーソル変更）
+    zone.classList.add('dp-drag-over');
+  });
+  zone.addEventListener('dragleave', e => {
+    if (!zone.contains(e.relatedTarget)) zone.classList.remove('dp-drag-over');
+  });
+  zone.addEventListener('dragend', () => zone.classList.remove('dp-drag-over'));
+  document.addEventListener('dragend', () => zone.classList.remove('dp-drag-over'));
+}
+
+async function addTaskToDailyPlan(taskId) {
+  if (dailyPlan.task_plans.some(tp => tp.task_id == taskId)) return; // 重複防止
+  try {
+    await api({ action: 'add_task_to_daily_plan', date: TODAY, task_id: taskId, planned_hours: 1.0 });
+    await loadDailyPlan();
+  } catch (e) {
+    console.warn('add to daily plan failed:', e);
+  }
+}
+
+/* ============================================================
    初期化
    ============================================================ */
 document.addEventListener('DOMContentLoaded', () => {
@@ -487,12 +779,38 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // 初回ロード
-  loadProjects().catch(err => {
-    const board = document.getElementById('board');
-    board.innerHTML = `<div style="color:#ef4444;padding:40px;">
-      読み込みエラー: ${esc(err.message)}<br>
-      <small>config.php のDB設定を確認してください。</small>
-    </div>`;
+  // 今日の作業計画: ドロップゾーン初期化
+  initDpDropZone();
+
+  // 今日の作業計画: 利用可能時間の変更
+  document.getElementById('availableHours').addEventListener('change', async (e) => {
+    const h = Math.max(0.5, Math.min(24, parseFloat(e.target.value) || 8));
+    e.target.value = h;
+    dailyPlan.available_hours = h;
+    try {
+      await api({ action: 'save_daily_available_hours', date: TODAY, available_hours: h });
+    } catch {}
+    renderDpBar();
   });
+
+  // 今日の作業計画: 折りたたみ
+  document.getElementById('dpToggleBtn').addEventListener('click', () => {
+    dpCollapsed = !dpCollapsed;
+    const body = document.getElementById('dpBody');
+    const btn  = document.getElementById('dpToggleBtn');
+    body.classList.toggle('dp-collapsed', dpCollapsed);
+    btn.textContent = dpCollapsed ? '▼' : '▲';
+    btn.title       = dpCollapsed ? '展開' : '折りたたむ';
+  });
+
+  // 初回ロード
+  loadProjects()
+    .then(() => loadDailyPlan())
+    .catch(err => {
+      const board = document.getElementById('board');
+      board.innerHTML = `<div style="color:#ef4444;padding:40px;">
+        読み込みエラー: ${esc(err.message)}<br>
+        <small>config.php のDB設定を確認してください。</small>
+      </div>`;
+    });
 });
