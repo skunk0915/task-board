@@ -54,10 +54,10 @@ body {
    ボード
    ============================================= */
 .board {
-  display: flex;
-  gap: 18px;
-  padding: 22px;
-  overflow-x: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--col-w), 1fr));
+  gap: 20px;
+  padding: 24px;
   align-items: flex-start;
   min-height: calc(100vh - var(--header-h));
   /* ちらつき防止 */
@@ -87,7 +87,8 @@ body {
    プロジェクト列
    ============================================= */
 .project-col {
-  flex: 0 0 var(--col-w);
+  /* flex: 0 0 var(--col-w);  Gridが制御するので不要 */
+  min-width: 0;
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
@@ -95,7 +96,11 @@ body {
   flex-direction: column;
   max-height: calc(100vh - var(--header-h) - 44px);
   border: 1px solid var(--border);
-  transition: box-shadow .2s;
+  transition: box-shadow .2s, transform .2s;
+}
+.project-col:hover {
+  box-shadow: var(--shadow);
+  transform: translateY(-4px);
 }
 .project-col.sortable-ghost { opacity: .35; }
 
@@ -855,4 +860,55 @@ input[type="range"] {
 .board::-webkit-scrollbar-thumb {
   background: #d0d4de;
   border-radius: 3px;
+}
+
+/* =============================================
+   レスポンシブ (メディアクエリ)
+   ============================================= */
+@media screen and (max-width: 600px) {
+  .app-header {
+    padding: 0 16px;
+  }
+  .app-title {
+    font-size: 15px;
+  }
+  .btn-primary {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  .daily-plan-header {
+    padding: 10px 16px;
+  }
+
+  .dp-body {
+    padding: 0 16px 14px;
+  }
+
+  .board {
+    grid-template-columns: 1fr; /* スマホでは1列固定 */
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .project-col {
+    max-height: 500px; /* スマホでは高さを制限して一覧しやすく */
+  }
+}
+
+@media screen and (min-width: 601px) and (max-width: 1024px) {
+  .board {
+    grid-template-columns: repeat(auto-fill, minmax(calc(50% - 10px), 1fr));
+    padding: 16px;
+  }
+}
+
+/* アニメーション */
+.project-col {
+  animation: fadeIn 0.4s ease-out backwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
 }
