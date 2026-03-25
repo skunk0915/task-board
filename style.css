@@ -54,14 +54,12 @@ body {
    ボード
    ============================================= */
 .board {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(var(--col-w), 1fr));
-  gap: 20px;
+  display: block;
+  columns: 300px 5; /* カラム幅300pxを基準に、最大5列まで自動調整 */
+  column-gap: 20px;
   padding: 24px;
-  align-items: flex-start;
   min-height: calc(100vh - var(--header-h));
-  /* ちらつき防止 */
-  -webkit-overflow-scrolling: touch;
+  overflow-y: auto;
 }
 
 .board-loading {
@@ -87,20 +85,39 @@ body {
    プロジェクト列
    ============================================= */
 .project-col {
-  /* flex: 0 0 var(--col-w);  Gridが制御するので不要 */
-  min-width: 0;
+  display: inline-flex; /* カラム内での崩れ防止 */
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 20px;
+  break-inside: avoid; /* カラムの途中で分割されないようにする */
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
-  display: flex;
-  flex-direction: column;
   max-height: calc(100vh - var(--header-h) - 44px);
   border: 1px solid var(--border);
   transition: box-shadow .2s, transform .2s;
+  animation: fadeIn 0.4s ease-out backwards;
 }
 .project-col:hover {
   box-shadow: var(--shadow);
   transform: translateY(-4px);
+}
+.project-col.collapsed {
+  max-height: 56px;
+  overflow: hidden;
+}
+.project-col.collapsed:hover {
+  transform: none;
+  box-shadow: var(--shadow-sm);
+}
+.project-col.collapsed .sort-controls,
+.project-col.collapsed .task-list,
+.project-col.collapsed .add-task-btn,
+.project-col.collapsed .task-count-badge {
+  display: none;
+}
+.project-col.collapsed .project-header {
+  border-bottom: none;
 }
 .project-col.sortable-ghost { opacity: .35; }
 
@@ -168,6 +185,7 @@ body {
   transition: background .15s, color .15s;
 }
 .icon-btn:hover { background: #f0f2f7; color: var(--text); }
+.icon-btn.toggle-proj-btn { margin-right: 4px; font-size: 11px; }
 
 /* ソートコントロール */
 .sort-controls { display: flex; gap: 4px; }
@@ -886,26 +904,19 @@ input[type="range"] {
   }
 
   .board {
-    grid-template-columns: 1fr; /* スマホでは1列固定 */
+    columns: 1;
     padding: 12px;
-    gap: 12px;
   }
-
   .project-col {
-    max-height: 500px; /* スマホでは高さを制限して一覧しやすく */
+    max-height: 500px;
   }
 }
 
 @media screen and (min-width: 601px) and (max-width: 1024px) {
   .board {
-    grid-template-columns: repeat(auto-fill, minmax(calc(50% - 10px), 1fr));
+    columns: 2;
     padding: 16px;
   }
-}
-
-/* アニメーション */
-.project-col {
-  animation: fadeIn 0.4s ease-out backwards;
 }
 
 @keyframes fadeIn {

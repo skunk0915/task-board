@@ -20,6 +20,7 @@ const LS = {
   SORT_MODE:    'tb_sort_mode',     // { [projectId]: 'manual'|'date'|'status' }
   PROJECT_ORDER:'tb_project_order', // [projectId, ...]
   HIDE_DONE:    'tb_hide_done',     // { [projectId]: true/false }
+  PROJECT_COLLAPSED: 'tb_proj_collapsed', // { [pid]: true/false }
 };
 
 /* ============================================================
@@ -214,11 +215,12 @@ function render() {
 function buildProjectCol(project, tasks, mode) {
   const pid      = project.id;
   const hideDone = ls.obj(LS.HIDE_DONE)[String(pid)] || false;
+  const collapsed = ls.obj(LS.PROJECT_COLLAPSED)[String(pid)] || false;
   const doneCnt  = tasks.filter(t => t.is_done).length;
   const visibleTasks = hideDone ? tasks.filter(t => !t.is_done) : tasks;
 
   const col = document.createElement('div');
-  col.className   = 'project-col';
+  col.className   = 'project-col' + (collapsed ? ' collapsed' : '');
   col.dataset.pid = pid;
 
   const doneFilterBtn = doneCnt > 0
@@ -234,6 +236,7 @@ function buildProjectCol(project, tasks, mode) {
           <span class="task-count-badge">${visibleTasks.length}</span>
         </div>
         <div class="project-actions">
+          <button class="icon-btn toggle-proj-btn" data-pid="${pid}" title="${collapsed ? '展開' : '折りたたむ'}">${collapsed ? '▼' : '▲'}</button>
           <button class="icon-btn edit-proj-btn"  data-pid="${pid}" title="編集">✏️</button>
           <button class="icon-btn del-proj-btn"   data-pid="${pid}" title="削除">🗑️</button>
         </div>
@@ -256,6 +259,7 @@ function buildProjectCol(project, tasks, mode) {
   `;
 
   // イベント委譲（列内）
+  col.querySelector('.toggle-proj-btn').addEventListener('click', () => toggleProjectCollapse(pid));
   col.querySelector('.edit-proj-btn').addEventListener('click', () => openEditProject(pid));
   col.querySelector('.del-proj-btn').addEventListener('click', () => confirmDeleteProject(pid));
   col.querySelectorAll('.sort-btn:not(.done-filter-btn)').forEach(btn =>
@@ -346,6 +350,27 @@ function toggleHideDone(pid) {
   const map = ls.obj(LS.HIDE_DONE);
   map[String(pid)] = !map[String(pid)];
   ls.set(LS.HIDE_DONE, map);
+  render();
+}
+
+/* ============================================================
+   プロジェクトの開閉
+   ============================================================ */
+function toggleProjectCollapse(pid) {
+  const map = ls.obj(LS.PROJECT_COLLAPSED);
+  map[String(pid)] = !map[String(pid)];
+  ls.set(LS.PROJECT_COLLAPSED, map);
+  render();
+}
+
+function toggleAllProjects() {
+  const map = ls.obj(LS.PROJECT_COLLAPSED);
+  // 現状を見て、1つでも開いているものがあれば全閉、そうでければ全開
+  const someOpen = projects.some(p => !map[String(p.id)]);
+  projects.forEach(p => {
+    map[String(p.id)] = someOpen;
+  });
+  ls.set(LS.PROJECT_COLLAPSED, map);
   render();
 }
 
@@ -744,6 +769,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ヘッダー
   document.getElementById('addProjectBtn').addEventListener('click', openAddProject);
+  document.getElementById('toggleAllBtn').addEventListener('click', toggleAllProjects);
 
   // プロジェクトモーダル
   document.getElementById('closeProjectModal').addEventListener('click',  () => closeModal('projectModal'));

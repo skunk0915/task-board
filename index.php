@@ -21,7 +21,10 @@
     <span class="header-icon">📋</span>
     <h1 class="app-title">タスクボード</h1>
   </div>
-  <button class="btn btn-primary" id="addProjectBtn">＋ プロジェクト追加</button>
+  <div class="header-right" style="display:flex;gap:8px;">
+    <button class="btn btn-secondary" id="toggleAllBtn" title="すべて開く/閉じる">全開閉</button>
+    <button class="btn btn-primary" id="addProjectBtn">＋ プロジェクト追加</button>
+  </div>
 </header>
 
 <!-- ====== 今日の作業計画 ====== -->
