@@ -236,6 +236,7 @@ function buildProjectCol(project, tasks, mode) {
           <span class="task-count-badge">${visibleTasks.length}</span>
         </div>
         <div class="project-actions">
+          <button class="icon-btn hide-done-btn${hideDone ? ' active' : ''}" data-pid="${pid}" title="${hideDone ? '完了タスクを表示' : '完了タスクを隠す'}">${hideDone ? '👁️‍🗨️' : '👁️'}</button>
           <button class="icon-btn toggle-proj-btn" data-pid="${pid}" title="${collapsed ? '展開' : '折りたたむ'}">${collapsed ? '▼' : '▲'}</button>
           <button class="icon-btn edit-proj-btn"  data-pid="${pid}" title="編集">✏️</button>
           <button class="icon-btn del-proj-btn"   data-pid="${pid}" title="削除">🗑️</button>
@@ -259,6 +260,7 @@ function buildProjectCol(project, tasks, mode) {
   `;
 
   // イベント委譲（列内）
+  col.querySelector('.hide-done-btn').addEventListener('click', () => toggleHideDone(pid));
   col.querySelector('.toggle-proj-btn').addEventListener('click', () => toggleProjectCollapse(pid));
   col.querySelector('.edit-proj-btn').addEventListener('click', () => openEditProject(pid));
   col.querySelector('.del-proj-btn').addEventListener('click', () => confirmDeleteProject(pid));
@@ -349,6 +351,17 @@ async function toggleTaskDone(tid) {
 function toggleHideDone(pid) {
   const map = ls.obj(LS.HIDE_DONE);
   map[String(pid)] = !map[String(pid)];
+  ls.set(LS.HIDE_DONE, map);
+  render();
+}
+
+function toggleAllHideDone() {
+  const map = ls.obj(LS.HIDE_DONE);
+  // 現状を見て、1つでも表示されている（hideDone=false）ものがあれば全非表示、そうでければ全表示
+  const someShown = projects.some(p => !map[String(p.id)]);
+  projects.forEach(p => {
+    map[String(p.id)] = someShown;
+  });
   ls.set(LS.HIDE_DONE, map);
   render();
 }
@@ -770,6 +783,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ヘッダー
   document.getElementById('addProjectBtn').addEventListener('click', openAddProject);
   document.getElementById('toggleAllBtn').addEventListener('click', toggleAllProjects);
+  document.getElementById('toggleAllDoneBtn').addEventListener('click', toggleAllHideDone);
 
   // プロジェクトモーダル
   document.getElementById('closeProjectModal').addEventListener('click',  () => closeModal('projectModal'));

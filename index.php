@@ -22,6 +22,7 @@
     <h1 class="app-title">タスクボード</h1>
   </div>
   <div class="header-right" style="display:flex;gap:8px;">
+    <button class="btn btn-secondary" id="toggleAllDoneBtn" title="完了タスクの表示/非表示を切り替え">完了表示/非表示</button>
     <button class="btn btn-secondary" id="toggleAllBtn" title="すべて開く/閉じる">全開閉</button>
     <button class="btn btn-primary" id="addProjectBtn">＋ プロジェクト追加</button>
   </div>
