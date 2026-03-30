@@ -465,7 +465,7 @@ function openAddTask(pid) {
   document.getElementById('taskProjectId').value      = pid;
   document.getElementById('taskName').value           = '';
   document.getElementById('taskDescription').value    = '';
-  document.getElementById('taskStartDate').value      = '';
+  document.getElementById('taskStartDate').value      = TODAY;
   document.getElementById('taskEndDate').value        = '';
   document.getElementById('taskEstimatedHours').value = '';
   document.getElementById('taskActualHours').value    = '0';
