@@ -25,6 +25,12 @@ try {
 
 // ── 自動マイグレーション ────────────────────────────────
 (function() use ($pdo) {
+    // projects: status
+    $cols = $pdo->query("SHOW COLUMNS FROM projects")->fetchAll(PDO::FETCH_COLUMN);
+    if (!in_array('status', $cols)) {
+        $pdo->exec("ALTER TABLE projects ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'");
+    }
+
     // tasks: estimated_hours / actual_hours / is_done
     $cols = $pdo->query("SHOW COLUMNS FROM tasks")->fetchAll(PDO::FETCH_COLUMN);
     if (!in_array('estimated_hours', $cols)) {
@@ -53,6 +59,16 @@ try {
         UNIQUE KEY uk_date_task (plan_date, task_id),
         FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // task_daily_logs
+    $pdo->exec("CREATE TABLE IF NOT EXISTS task_daily_logs (
+        id           INT AUTO_INCREMENT PRIMARY KEY,
+        task_id      INT NOT NULL,
+        log_date     DATE NOT NULL,
+        hours_spent  DECIMAL(5,1) NOT NULL DEFAULT 0.0,
+        progress_pct INT NOT NULL DEFAULT 0,
+        UNIQUE KEY uk_task_date (task_id, log_date),
+        FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 })();
 
 // 入力
@@ -77,9 +93,20 @@ switch ($action) {
     case 'get_all':
         $projects = $pdo->query("SELECT * FROM projects ORDER BY position, id")->fetchAll();
         $tasks    = $pdo->query("SELECT * FROM tasks    ORDER BY position, id")->fetchAll();
+        $logs     = $pdo->query("SELECT * FROM task_daily_logs ORDER BY log_date ASC, id ASC")->fetchAll();
+
+        $logMap = [];
+        foreach ($logs as $l) {
+            $l['id']           = (int)$l['id'];
+            $l['task_id']      = (int)$l['task_id'];
+            $l['hours_spent']  = (float)$l['hours_spent'];
+            $l['progress_pct'] = (int)$l['progress_pct'];
+            $logMap[$l['task_id']][] = $l;
+        }
 
         $taskMap = [];
         foreach ($tasks as $t) {
+            $t['logs'] = $logMap[$t['id']] ?? [];
             $taskMap[$t['project_id']][] = $t;
         }
         foreach ($projects as &$p) {
@@ -91,20 +118,22 @@ switch ($action) {
     // ── プロジェクト CRUD ────────────────────────────────
     case 'create_project':
         if ($err = requireFields($input, ['name'])) { badReq($err); break; }
-        $name  = trim($input['name']);
-        $color = preg_match($validColors, $input['color'] ?? '') ? $input['color'] : '#4A90D9';
-        $pos   = (int)$pdo->query("SELECT COALESCE(MAX(position),0)+1 FROM projects")->fetchColumn();
-        $stmt  = $pdo->prepare("INSERT INTO projects (name,color,position) VALUES (?,?,?)");
-        $stmt->execute([$name, $color, $pos]);
+        $name   = trim($input['name']);
+        $color  = preg_match($validColors, $input['color'] ?? '') ? $input['color'] : '#4A90D9';
+        $status = $input['status'] ?? 'active';
+        $pos    = (int)$pdo->query("SELECT COALESCE(MAX(position),0)+1 FROM projects")->fetchColumn();
+        $stmt   = $pdo->prepare("INSERT INTO projects (name,color,position,status) VALUES (?,?,?,?)");
+        $stmt->execute([$name, $color, $pos, $status]);
         echo json_encode(['id' => (int)$pdo->lastInsertId()]);
         break;
 
     case 'update_project':
         if ($err = requireFields($input, ['id','name'])) { badReq($err); break; }
-        $id    = (int)$input['id'];
-        $name  = trim($input['name']);
-        $color = preg_match($validColors, $input['color'] ?? '') ? $input['color'] : '#4A90D9';
-        $pdo->prepare("UPDATE projects SET name=?,color=? WHERE id=?")->execute([$name, $color, $id]);
+        $id     = (int)$input['id'];
+        $name   = trim($input['name']);
+        $color  = preg_match($validColors, $input['color'] ?? '') ? $input['color'] : '#4A90D9';
+        $status = $input['status'] ?? 'active';
+        $pdo->prepare("UPDATE projects SET name=?,color=?,status=? WHERE id=?")->execute([$name, $color, $status, $id]);
         echo json_encode(['ok' => true]);
         break;
 
@@ -173,6 +202,28 @@ switch ($action) {
         $id = (int)($input['id'] ?? 0);
         if (!$id) { badReq('id required'); break; }
         $pdo->prepare("DELETE FROM tasks WHERE id=?")->execute([$id]);
+        echo json_encode(['ok' => true]);
+        break;
+
+    case 'save_daily_log':
+        if ($err = requireFields($input, ['task_id', 'log_date'])) { badReq($err); break; }
+        $tid   = (int)$input['task_id'];
+        $date  = validDate($input['log_date']);
+        $hours = max(0, (float)($input['hours_spent'] ?? 0));
+        $pct   = max(0, min(100, (int)($input['progress_pct'] ?? 0)));
+        if (!$date) { badReq('invalid date'); break; }
+
+        $pdo->prepare("INSERT INTO task_daily_logs (task_id, log_date, hours_spent, progress_pct) VALUES (?,?,?,?)
+                       ON DUPLICATE KEY UPDATE hours_spent=?, progress_pct=?")
+            ->execute([$tid, $date, $hours, $pct, $hours, $pct]);
+        
+        // タスクの合計実績時間と進捗を更新
+        $pdo->prepare("UPDATE tasks SET 
+            actual_hours = (SELECT SUM(hours_spent) FROM task_daily_logs WHERE task_id=?),
+            progress = ?
+            WHERE id=?")
+            ->execute([$tid, $pct, $tid]);
+            
         echo json_encode(['ok' => true]);
         break;
 

@@ -136,6 +136,16 @@ body {
   overflow: hidden;
 }
 
+.project-col.stopped {
+  opacity: 0.6;
+  filter: grayscale(0.8);
+}
+
+.project-col.stopped:hover {
+  opacity: 0.8;
+  filter: grayscale(0.5);
+}
+
 .project-col.collapsed:hover {
   transform: none;
   box-shadow: var(--shadow-sm);
@@ -198,6 +208,20 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.status-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.status-badge.stopped {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #cbd5e1;
 }
 
 .task-count-badge {
@@ -367,27 +391,26 @@ body {
   color: var(--muted);
 }
 
-/* 進捗バー */
+/* 進捗バー (積み上げ棒グラフ) */
 .progress-wrap {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex: 1;
   min-width: 0;
 }
 
-.progress-bar-bg {
+.stacked-progress-bar {
   flex: 1;
-  height: 5px;
+  height: 8px;
   background: #e5e8ef;
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
+  display: flex;
 }
 
-.progress-bar-fill {
+.progress-segment {
   height: 100%;
-  border-radius: 3px;
-  transition: width .3s;
 }
 
 .progress-pct {
@@ -398,6 +421,77 @@ body {
   min-width: 30px;
   text-align: right;
 }
+
+/* 日次ログ (タスク詳細) */
+.daily-logs-section {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+
+.daily-logs-title {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.daily-log-list {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.daily-log-item {
+  display: grid;
+  grid-template-columns: 100px 1fr 100px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.daily-log-item:last-child {
+  border-bottom: none;
+}
+
+.daily-log-date {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.daily-log-hours {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.daily-log-pct {
+  font-weight: 600;
+  text-align: right;
+}
+
+.daily-log-form {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.log-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: flex-end;
+}
+
+.log-form-grid .form-group {
+  margin-bottom: 0;
+}
+
 
 /* タスク追加ボタン */
 .add-task-btn {
@@ -649,6 +743,49 @@ body {
   outline-color: var(--text);
   transform: scale(1.15);
 }
+
+/* ステータスセレクター */
+.status-selector {
+  display: flex;
+  gap: 12px;
+}
+
+.status-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: all .15s;
+}
+
+.status-opt:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.status-opt:has(input:checked) {
+  background: #f0f7ff;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Chrome/Safari/Edge doesn't support :has fully yet in all versions, 
+   so we use a more standard approach with Adjacent Sibling Combinator if needed,
+   but for now let's use a simpler class-based or sibling approach. */
+.status-opt input {
+  margin: 0;
+}
+
+.status-opt input:checked + span {
+  color: var(--accent);
+  font-weight: 700;
+}
+
 
 /* レンジスライダー */
 input[type="range"] {

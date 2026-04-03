@@ -5,14 +5,8 @@
    ============================================================ */
 const API = 'api.php';
 
-// 進捗バーの色 (0-100)
-function progressColor(pct) {
-  if (pct === 100) return '#10b981'; // 完了: グリーン
-  if (pct >= 60)  return '#3b82f6'; // 進行: ブルー
-  if (pct >= 20)  return '#f59e0b'; // 序盤: アンバー
-  if (pct > 0)    return '#94a3b8'; // 序盤: スレートグレー
-  return '#e5e8ef';                  // 0%: 非表示（背景色と同色）
-}
+// 進捗バーの色 (0-100) - Note: Now using STACKED_COLORS loop instead.
+// function progressColor(pct) { ... }
 
 // ローカルストレージキー
 const LS = {
@@ -22,6 +16,10 @@ const LS = {
   HIDE_DONE:    'tb_hide_done',     // { [projectId]: true/false }
   PROJECT_COLLAPSED: 'tb_proj_collapsed', // { [pid]: true/false }
 };
+
+const STACKED_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316'
+];
 
 /* ============================================================
    状態
@@ -219,8 +217,9 @@ function buildProjectCol(project, tasks, mode) {
   const doneCnt  = tasks.filter(t => t.is_done).length;
   const visibleTasks = hideDone ? tasks.filter(t => !t.is_done) : tasks;
 
+  const isStopped = project.status === 'stopped';
   const col = document.createElement('div');
-  col.className   = 'project-col' + (collapsed ? ' collapsed' : '');
+  col.className   = 'project-col' + (collapsed ? ' collapsed' : '') + (isStopped ? ' stopped' : '');
   col.dataset.pid = pid;
 
   const doneFilterBtn = doneCnt > 0
@@ -233,6 +232,7 @@ function buildProjectCol(project, tasks, mode) {
         <div class="project-title-row">
           <span class="proj-drag-handle" title="ドラッグして移動">⠿</span>
           <span class="project-name" title="${esc(project.name)}">${esc(project.name)}</span>
+          ${isStopped ? '<span class="status-badge stopped">停止中</span>' : ''}
           <span class="task-count-badge">${visibleTasks.length}</span>
         </div>
         <div class="project-actions">
@@ -285,15 +285,37 @@ function buildProjectCol(project, tasks, mode) {
 function buildTaskCard(task) {
   const isDone = !!task.is_done;
   const pct    = task.progress ?? 0;
-  const color  = isDone ? '#94a3b8' : progressColor(pct);
   const estH   = task.estimated_hours != null ? parseFloat(task.estimated_hours) : null;
   const actH   = parseFloat(task.actual_hours ?? 0);
+  
   const timeInfo = (estH != null || actH > 0)
     ? `<div class="task-time-info">
         ${estH != null ? `<span class="task-est-h" title="所要予定時間">予${estH}h</span>` : ''}
         ${actH > 0    ? `<span class="task-act-h" title="累積作業時間">実${actH}h</span>` : ''}
        </div>`
     : '';
+
+  // 積み上げ棒グラフの生成
+  const logs = task.logs || [];
+  let segments = '';
+  if (logs.length > 0) {
+    let lastPct = 0;
+    logs.forEach((log, index) => {
+      const diff = log.progress_pct - lastPct;
+      if (diff > 0) {
+        const color = STACKED_COLORS[index % STACKED_COLORS.length];
+        segments += `<div class="progress-segment" style="width:${diff}%; background:${color}" title="${log.log_date}: +${diff}% (${log.hours_spent}h)"></div>`;
+        lastPct = log.progress_pct;
+      }
+    });
+    // 100%に満たない分（完了ボタン以外での手動進捗調整用予備）
+    if (pct > lastPct) {
+        segments += `<div class="progress-segment" style="width:${pct - lastPct}%; background:#cbd5e1"></div>`;
+    }
+  } else if (pct > 0) {
+    segments = `<div class="progress-segment" style="width:${pct}%; background:#3b82f6"></div>`;
+  }
+
   return `
     <div class="task-card${isDone ? ' is-done' : ''}" data-tid="${task.id}">
       <span class="task-drag-handle" title="ドラッグして並べ替え / 今日の計画へ">⠿</span>
@@ -303,9 +325,7 @@ function buildTaskCard(task) {
         <div class="task-meta">
           <span class="task-date">${task.start_date ? '📅 ' + fmtDate(task.start_date) : ''}</span>
           <div class="progress-wrap">
-            <div class="progress-bar-bg">
-              <div class="progress-bar-fill" style="width:${pct}%;background:${color}"></div>
-            </div>
+            <div class="stacked-progress-bar">${segments}</div>
             <span class="progress-pct">${pct}%</span>
           </div>
         </div>
@@ -397,6 +417,7 @@ function openAddProject() {
   document.getElementById('projectId').value    = '';
   document.getElementById('projectName').value  = '';
   document.getElementById('projectColor').value = selectedColor;
+  document.querySelector('input[name="projectStatus"][value="active"]').checked = true;
   document.getElementById('projectModalTitle').textContent = 'プロジェクト追加';
   syncColorPicker(selectedColor);
   openModal('projectModal');
@@ -410,6 +431,7 @@ function openEditProject(pid) {
   document.getElementById('projectId').value    = p.id;
   document.getElementById('projectName').value  = p.name;
   document.getElementById('projectColor').value = selectedColor;
+  document.querySelector(`input[name="projectStatus"][value="${p.status || 'active'}"]`).checked = true;
   document.getElementById('projectModalTitle').textContent = 'プロジェクト編集';
   syncColorPicker(selectedColor);
   openModal('projectModal');
@@ -417,15 +439,16 @@ function openEditProject(pid) {
 }
 
 async function saveProject() {
-  const id    = document.getElementById('projectId').value;
-  const name  = document.getElementById('projectName').value.trim();
-  const color = document.getElementById('projectColor').value;
+  const id     = document.getElementById('projectId').value;
+  const name   = document.getElementById('projectName').value.trim();
+  const color  = document.getElementById('projectColor').value;
+  const status = document.querySelector('input[name="projectStatus"]:checked').value;
   if (!name) { alert('プロジェクト名を入力してください'); return; }
   try {
     if (id) {
-      await api({ action: 'update_project', id, name, color });
+      await api({ action: 'update_project', id, name, color, status });
     } else {
-      await api({ action: 'create_project', name, color });
+      await api({ action: 'create_project', name, color, status });
     }
     closeModal('projectModal');
     await loadProjects();
@@ -472,8 +495,63 @@ function openAddTask(pid) {
   setProgressSlider(0);
   document.getElementById('taskModalTitle').textContent = 'タスク追加';
   document.getElementById('deleteTaskBtn').style.display = 'none';
+  document.getElementById('dailyLogsSection').style.display = 'none';
   openModal('taskModal');
   document.getElementById('taskName').focus();
+}
+
+function renderDailyLogList(task) {
+  const list = document.getElementById('dailyLogList');
+  const logs = task.logs || [];
+  if (logs.length === 0) {
+    list.innerHTML = `<div class="task-empty">記録された実績はありません</div>`;
+    return;
+  }
+  list.innerHTML = logs.map(l => `
+    <div class="daily-log-item">
+      <span class="daily-log-date">${fmtDate(l.log_date)}</span>
+      <span class="daily-log-hours">${l.hours_spent}h</span>
+      <span class="daily-log-pct">累計進捗: ${l.progress_pct}%</span>
+    </div>
+  `).join('');
+}
+
+async function saveDailyLog() {
+  const tid   = document.getElementById('taskId').value;
+  const date  = document.getElementById('logDate').value;
+  const hours = parseFloat(document.getElementById('logHours').value) || 0;
+  const pct   = parseInt(document.getElementById('logPct').value) || 0;
+  
+  if (!tid) return;
+  if (!date) { alert('日付を指定してください'); return; }
+
+  try {
+    const res = await api({
+      action: 'save_daily_log',
+      task_id: tid,
+      log_date: date,
+      hours_spent: hours,
+      progress_pct: pct
+    });
+    
+    // UIを更新
+    await loadProjects();
+    // モーダル内の表示も更新
+    let task = null;
+    for (const p of projects) {
+        task = (p.tasks || []).find(t => t.id == tid);
+        if (task) break;
+    }
+    if (task) {
+        renderDailyLogList(task);
+        document.getElementById('taskActualHours').value = task.actual_hours;
+        setProgressSlider(task.progress);
+    }
+    // フォームをリセット
+    document.getElementById('logHours').value = 0;
+  } catch (e) {
+    alert('保存失敗: ' + e.message);
+  }
 }
 
 function openEditTask(tid) {
@@ -495,6 +573,13 @@ function openEditTask(tid) {
   setProgressSlider(task.progress ?? 0);
   document.getElementById('taskModalTitle').textContent = 'タスク編集';
   document.getElementById('deleteTaskBtn').style.display = '';
+  document.getElementById('dailyLogsSection').style.display = 'block';
+  
+  // ログフォームの初期化
+  document.getElementById('logDate').value = TODAY;
+  document.getElementById('logPct').value  = task.progress ?? 0;
+  renderDailyLogList(task);
+
   openModal('taskModal');
   document.getElementById('taskName').focus();
 }
@@ -803,7 +888,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // 進捗スライダー
   document.getElementById('taskProgress').addEventListener('input', e => {
     document.getElementById('taskProgressLabel').textContent = e.target.value;
+    document.getElementById('logPct').value = e.target.value;
   });
+
+  // 日次ログ
+  document.getElementById('saveLogBtn').addEventListener('click', saveDailyLog);
 
   // タスクモーダル
   document.getElementById('closeTaskModal').addEventListener('click',  () => closeModal('taskModal'));

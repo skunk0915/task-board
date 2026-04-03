@@ -86,6 +86,19 @@
         </div>
         <input type="hidden" id="projectColor" value="#4A90D9">
       </div>
+      <div class="form-group">
+        <label>ステータス</label>
+        <div class="status-selector">
+          <label class="status-opt">
+            <input type="radio" name="projectStatus" value="active" checked>
+            <span>進行中</span>
+          </label>
+          <label class="status-opt">
+            <input type="radio" name="projectStatus" value="stopped">
+            <span>停止中</span>
+          </label>
+        </div>
+      </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-secondary" id="cancelProjectModal">キャンセル</button>
@@ -135,10 +148,33 @@
           </div>
         </div>
         <div class="form-group">
-          <label for="taskActualHours">累積作業時間</label>
+          <label for="taskActualHours">累積作業時間 (自動算出)</label>
           <div class="input-with-unit">
-            <input type="number" id="taskActualHours" min="0" max="9999" step="0.5" value="0">
+            <input type="number" id="taskActualHours" min="0" max="9999" step="0.5" value="0" readonly style="background:#f0f2f7">
             <span class="input-unit">h</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="daily-logs-section" id="dailyLogsSection" style="display:none">
+        <h3 class="daily-logs-title">📅 日次ログ (時間と進捗の記録)</h3>
+        <div class="daily-log-list" id="dailyLogList"></div>
+        
+        <div class="daily-log-form">
+          <div class="log-form-grid">
+            <div class="form-group">
+              <label for="logDate">日付</label>
+              <input type="date" id="logDate">
+            </div>
+            <div class="form-group">
+              <label for="logHours">時間 (h)</label>
+              <input type="number" id="logHours" min="0" max="24" step="0.5" value="0">
+            </div>
+            <div class="form-group">
+              <label for="logPct">進捗率 (%)</label>
+              <input type="number" id="logPct" min="0" max="100" step="1" value="0">
+            </div>
+            <button class="btn btn-primary" id="saveLogBtn">記録</button>
           </div>
         </div>
       </div>
