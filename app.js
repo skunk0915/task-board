@@ -210,6 +210,31 @@ function render() {
   });
 }
 
+function getStackedBarSegments(task) {
+  const pct  = task.progress ?? 0;
+  const logs = task.logs || [];
+  let segments = '';
+  
+  if (logs.length > 0) {
+    let accumulated = 0;
+    logs.forEach((log, index) => {
+      const pDelta = parseInt(log.progress_pct) || 0;
+      if (pDelta > 0) {
+        const color = STACKED_COLORS[index % STACKED_COLORS.length];
+        segments += `<div class="progress-segment" style="width:${pDelta}%; background:${color}" title="${log.log_date}: +${pDelta}% (${log.hours_spent}h)"></div>`;
+        accumulated += pDelta;
+      }
+    });
+    // 累計進捗(pct)がログの合計(accumulated)より大きい場合、その差分をグレーで表示
+    if (pct > accumulated) {
+      segments += `<div class="progress-segment" style="width:${pct - accumulated}%; background:#cbd5e1" title="手動更新された進捗"></div>`;
+    }
+  } else if (pct > 0) {
+    segments = `<div class="progress-segment" style="width:${pct}%; background:#3b82f6"></div>`;
+  }
+  return segments;
+}
+
 function buildProjectCol(project, tasks, mode) {
   const pid      = project.id;
   const hideDone = ls.obj(LS.HIDE_DONE)[String(pid)] || false;
@@ -250,6 +275,13 @@ function buildProjectCol(project, tasks, mode) {
       </div>
     </div>
 
+    ${(!collapsed && (project.start_date || project.description)) ? `
+      <div class="project-meta-info">
+        ${project.start_date ? `<span class="project-start-date">📅 開始日: ${fmtDate(project.start_date)}</span>` : ''}
+        ${project.description ? `<div class="project-description">${esc(project.description)}</div>` : ''}
+      </div>
+    ` : ''}
+
     <div class="task-list" id="tl-${pid}">
       ${visibleTasks.length === 0
         ? '<div class="task-empty">タスクなし</div>'
@@ -278,6 +310,12 @@ function buildProjectCol(project, tasks, mode) {
       toggleTaskDone(Number(btn.dataset.tid));
     })
   );
+  col.querySelectorAll('.btn-add-to-dp').forEach(btn =>
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      addTaskToDailyPlan(parseInt(btn.dataset.tid));
+    })
+  );
 
   return col;
 }
@@ -295,37 +333,21 @@ function buildTaskCard(task) {
        </div>`
     : '';
 
-  // 積み上げ棒グラフの生成
-  const logs = task.logs || [];
-  let segments = '';
-  if (logs.length > 0) {
-    let lastPct = 0;
-    logs.forEach((log, index) => {
-      const diff = log.progress_pct - lastPct;
-      if (diff > 0) {
-        const color = STACKED_COLORS[index % STACKED_COLORS.length];
-        segments += `<div class="progress-segment" style="width:${diff}%; background:${color}" title="${log.log_date}: +${diff}% (${log.hours_spent}h)"></div>`;
-        lastPct = log.progress_pct;
-      }
-    });
-    // 100%に満たない分（完了ボタン以外での手動進捗調整用予備）
-    if (pct > lastPct) {
-        segments += `<div class="progress-segment" style="width:${pct - lastPct}%; background:#cbd5e1"></div>`;
-    }
-  } else if (pct > 0) {
-    segments = `<div class="progress-segment" style="width:${pct}%; background:#3b82f6"></div>`;
-  }
-
+  const segments = getStackedBarSegments(task);
+  
   return `
     <div class="task-card${isDone ? ' is-done' : ''}" data-tid="${task.id}">
       <span class="task-drag-handle" title="ドラッグして並べ替え / 今日の計画へ">⠿</span>
       <button class="task-done-btn${isDone ? ' done' : ''}" data-tid="${task.id}" title="${isDone ? '完了を解除' : '完了にする'}">✓</button>
+      <div class="dp-task-sub-menu">
+        <button class="btn-mini btn-add-to-dp" data-tid="${task.id}" title="今日の作業予定に追加">今日</button>
+      </div>
       <div class="task-card-body">
         <div class="task-name">${esc(task.name)}</div>
         <div class="task-meta">
           <span class="task-date">${task.start_date ? '📅 ' + fmtDate(task.start_date) : ''}</span>
           <div class="progress-wrap">
-            <div class="stacked-progress-bar">${segments}</div>
+            <div class="stacked-progress-bar">${getStackedBarSegments(task)}</div>
             <span class="progress-pct">${pct}%</span>
           </div>
         </div>
@@ -431,6 +453,8 @@ function openEditProject(pid) {
   document.getElementById('projectId').value    = p.id;
   document.getElementById('projectName').value  = p.name;
   document.getElementById('projectColor').value = selectedColor;
+  document.getElementById('projectStartDate').value = p.start_date || '';
+  document.getElementById('projectDescription').value = p.description || '';
   document.querySelector(`input[name="projectStatus"][value="${p.status || 'active'}"]`).checked = true;
   document.getElementById('projectModalTitle').textContent = 'プロジェクト編集';
   syncColorPicker(selectedColor);
@@ -443,12 +467,14 @@ async function saveProject() {
   const name   = document.getElementById('projectName').value.trim();
   const color  = document.getElementById('projectColor').value;
   const status = document.querySelector('input[name="projectStatus"]:checked').value;
+  const start_date  = document.getElementById('projectStartDate').value;
+  const description = document.getElementById('projectDescription').value.trim();
   if (!name) { alert('プロジェクト名を入力してください'); return; }
   try {
     if (id) {
-      await api({ action: 'update_project', id, name, color, status });
+      await api({ action: 'update_project', id, name, color, status, start_date, description });
     } else {
-      await api({ action: 'create_project', name, color, status });
+      await api({ action: 'create_project', name, color, status, start_date, description });
     }
     closeModal('projectModal');
     await loadProjects();
@@ -503,17 +529,33 @@ function openAddTask(pid) {
 function renderDailyLogList(task) {
   const list = document.getElementById('dailyLogList');
   const logs = task.logs || [];
+  list.innerHTML = '';
+
   if (logs.length === 0) {
     list.innerHTML = `<div class="task-empty">記録された実績はありません</div>`;
     return;
   }
-  list.innerHTML = logs.map(l => `
-    <div class="daily-log-item">
+
+  logs.forEach(l => {
+    const item = document.createElement('div');
+    item.className = 'daily-log-item';
+    item.title = 'クリックして編集';
+    item.innerHTML = `
       <span class="daily-log-date">${fmtDate(l.log_date)}</span>
       <span class="daily-log-hours">${l.hours_spent}h</span>
-      <span class="daily-log-pct">累計進捗: ${l.progress_pct}%</span>
-    </div>
-  `).join('');
+      <span class="daily-log-pct">今日の進捗: +${l.progress_pct}%</span>
+    `;
+    item.addEventListener('click', () => {
+      document.getElementById('logDate').value = l.log_date;
+      document.getElementById('logHours').value = l.hours_spent;
+      document.getElementById('logPct').value = l.progress_pct;
+      document.getElementById('logHours').focus();
+    });
+    list.appendChild(item);
+  });
+  
+  // モーダル内のグラフも更新
+  document.getElementById('taskModalStackedBar').innerHTML = getStackedBarSegments(task);
 }
 
 async function saveDailyLog() {
@@ -577,7 +619,7 @@ function openEditTask(tid) {
   
   // ログフォームの初期化
   document.getElementById('logDate').value = TODAY;
-  document.getElementById('logPct').value  = task.progress ?? 0;
+  document.getElementById('logPct').value  = 0;
   renderDailyLogList(task);
 
   openModal('taskModal');
@@ -748,23 +790,27 @@ function calcExpectedProgress(currentPct, estHours, todayHours) {
 }
 
 function renderDpBar() {
-  const area      = document.getElementById('dpBarArea');
-  const available = dailyPlan.available_hours;
-  const tasks     = dailyPlan.task_plans;
+  const barArea      = document.getElementById('dpBarArea');
+  const calloutsArea = document.getElementById('dpCalloutsArea');
+  const available    = dailyPlan.available_hours;
+  const tasks        = dailyPlan.task_plans;
 
   if (tasks.length === 0) {
-    area.innerHTML = '';
+    barArea.innerHTML      = '';
+    calloutsArea.innerHTML = '';
     return;
   }
 
   const totalPlanned = tasks.reduce((s, t) => s + parseFloat(t.planned_hours), 0);
   const scale        = Math.max(totalPlanned, available);
-  const overTime     = totalPlanned > available;
 
-  let segments = '';
+  let barSegments = '';
+  let calloutsHtml = '';
+
   tasks.forEach(tp => {
     const project    = projects.find(p => p.id == tp.project_id);
     const color      = project ? project.color : '#4A90D9';
+    const projName   = project ? project.name : 'Unknown';
     const ph         = parseFloat(tp.planned_hours);
     const widthPct   = (ph / scale) * 100;
     const curPct     = parseInt(tp.progress) || 0;
@@ -773,46 +819,53 @@ function renderDpBar() {
     const newPct     = calcExpectedProgress(curPct, estH, ph);
     const hasEst     = estH != null && estH > 0;
 
-    const progressChange = hasEst
-      ? `<div class="dp-callout-progress">
-           <span class="dp-callout-cur">${curPct}%</span>
-           <span class="dp-callout-arrow">→</span>
-           <span class="dp-callout-new">${newPct}%</span>
-         </div>`
-      : `<div class="dp-callout-progress dp-callout-no-est">進捗予測には所要予定時間を設定してください</div>`;
+    // バー部分
+    barSegments += `<div class="dp-bar-seg" style="width:${widthPct.toFixed(2)}%;background:${esc(color)}" title="${esc(tp.name)}: ${ph}h"></div>`;
 
-    const hoursRow = `<div class="dp-callout-hours">今日: ${ph}h${hasEst ? ` / 予定: ${estH}h` : ''}${actH > 0 ? ` / 累積: ${actH}h` : ''}</div>`;
-
-    segments += `
-      <div class="dp-bar-seg" style="width:${widthPct.toFixed(2)}%;background:${esc(color)}" data-tid="${tp.task_id}">
-        <div class="dp-callout">
-          <div class="dp-callout-name">${esc(tp.name)}</div>
-          ${progressChange}
-          ${hoursRow}
+    // 呼び出し（固定表示）部分
+    calloutsHtml += `
+      <div class="dp-callout-fixed" style="border-left-color:${esc(color)}">
+        <div class="dp-callout-fixed-header">
+          <div style="flex:1; min-width:0">
+            <div class="dp-callout-project-name">${esc(projName)}</div>
+            <div class="dp-callout-task-name">${esc(tp.name)}</div>
+          </div>
         </div>
-      </div>`;
+        <div class="dp-callout-hours-grid">
+          <span>今日: <b>${ph}h</b></span>
+          ${hasEst ? `<span>予定: <b>${estH}h</b></span>` : '<span>予定: <b>--</b></span>'}
+          <span>累計: <b>${actH}h</b></span>
+        </div>
+        <div class="dp-callout-prog-bar-wrap">
+          <div class="dp-callout-prog-text">
+            <span>${curPct}%</span>
+            ${hasEst ? `<span class="dp-callout-prog-arrow">→ ${newPct}%</span>` : ''}
+          </div>
+          <div class="dp-callout-prog-bar">
+            <div class="dp-callout-prog-fill-cur" style="width:${curPct}%"></div>
+            ${hasEst ? `<div class="dp-callout-prog-fill-new" style="width:${newPct}%"></div>` : ''}
+          </div>
+          ${!hasEst ? `<div class="dp-callout-no-est-msg">所要予定時間を設定すると予測が表示されます</div>` : ''}
+        </div>
+      </div>
+    `;
   });
 
   // 余り時間
   if (available > totalPlanned) {
     const remPct = ((available - totalPlanned) / scale) * 100;
-    segments += `<div class="dp-bar-seg dp-bar-rem" style="width:${remPct.toFixed(2)}%">
-      <div class="dp-callout dp-callout-rem">
-        <div class="dp-callout-name">空き時間: ${(available - totalPlanned).toFixed(1)}h</div>
-      </div>
-    </div>`;
+    barSegments += `<div class="dp-bar-seg dp-bar-rem" style="width:${remPct.toFixed(2)}%">空き ${(available - totalPlanned).toFixed(1)}h</div>`;
   }
 
-  const overWarn = overTime
-    ? `<span class="dp-over-warn">⚠️ 計画 ${totalPlanned.toFixed(1)}h が利用可能時間 ${available}h を超えています</span>`
-    : `<span class="dp-time-summary">計画 ${totalPlanned.toFixed(1)}h / 利用可能 ${available}h（余り ${Math.max(0, available - totalPlanned).toFixed(1)}h）</span>`;
+  barArea.innerHTML = barSegments;
+  calloutsArea.innerHTML = calloutsHtml;
 
-  area.innerHTML = `
-    <div class="dp-bar-wrap">
-      <div class="dp-bar">${segments}</div>
-      <div class="dp-bar-footer">${overWarn}</div>
-    </div>
-  `;
+  // 合計時間の警告表示など（必要であれば）
+  const overWarn = totalPlanned > available
+    ? `<div class="dp-over-warn">⚠️ 計画 ${totalPlanned.toFixed(1)}h が利用可能時間 ${available}h を超えています</div>`
+    : '';
+  // ※ index.php に警告用エリアがない場合は append するなどの処理が必要ですが、
+  // 現状は calloutsArea の下などに入れるか、barArea に含めることができます。
 }
 
 function setupDailySortable() {

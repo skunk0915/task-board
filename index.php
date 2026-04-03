@@ -48,7 +48,10 @@
       <div class="dp-tasks-list" id="dpTasksList"></div>
       <div class="dp-drop-hint" id="dpDropHint">タスクカードをここにドラッグして追加</div>
     </div>
-    <div class="dp-bar-area" id="dpBarArea"></div>
+    <div class="dp-viz-area">
+      <div class="dp-bar-area" id="dpBarArea"></div>
+      <div class="dp-callouts-area" id="dpCalloutsArea"></div>
+    </div>
   </div>
 </section>
 
@@ -85,6 +88,14 @@
           <div class="color-opt" data-color="#607D8B" style="background:#607D8B" title="グレー"></div>
         </div>
         <input type="hidden" id="projectColor" value="#4A90D9">
+      </div>
+      <div class="form-group">
+        <label for="projectStartDate">開始日</label>
+        <input type="date" id="projectStartDate">
+      </div>
+      <div class="form-group">
+        <label for="projectDescription">プロジェクト概要</label>
+        <textarea id="projectDescription" rows="3" placeholder="プロジェクトの目的や概要を入力..."></textarea>
       </div>
       <div class="form-group">
         <label>ステータス</label>
@@ -158,6 +169,7 @@
 
       <div class="daily-logs-section" id="dailyLogsSection" style="display:none">
         <h3 class="daily-logs-title">📅 日次ログ (時間と進捗の記録)</h3>
+        <div id="taskModalStackedBar" class="stacked-progress-bar" style="margin-bottom:16px; height:12px;"></div>
         <div class="daily-log-list" id="dailyLogList"></div>
         
         <div class="daily-log-form">
@@ -171,7 +183,7 @@
               <input type="number" id="logHours" min="0" max="24" step="0.5" value="0">
             </div>
             <div class="form-group">
-              <label for="logPct">進捗率 (%)</label>
+              <label for="logPct">今日の進捗 (%)</label>
               <input type="number" id="logPct" min="0" max="100" step="1" value="0">
             </div>
             <button class="btn btn-primary" id="saveLogBtn">記録</button>
