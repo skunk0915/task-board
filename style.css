@@ -72,13 +72,12 @@ body {
    ボード
    ============================================= */
 .board {
-  display: block;
-  columns: 300px 5;
-  /* カラム幅300pxを基準に、最大5列まで自動調整 */
-  column-gap: 20px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  align-items: start;
+  gap: 20px;
   padding: 24px;
   min-height: calc(100vh - var(--header-h));
-  overflow-y: auto;
 }
 
 .board-loading {
@@ -110,29 +109,39 @@ body {
    プロジェクト列
    ============================================= */
 .project-col {
-  display: inline-flex;
-  /* カラム内での崩れ防止 */
+  display: flex;
   flex-direction: column;
   width: 100%;
-  margin-bottom: 20px;
-  break-inside: avoid;
-  /* カラムの途中で分割されないようにする */
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   max-height: calc(100vh - var(--header-h) - 44px);
   border: 1px solid var(--border);
   transition: box-shadow .2s, transform .2s;
   animation: fadeIn 0.4s ease-out backwards;
+  overflow: hidden;
 }
 
 .project-col:hover {
   box-shadow: var(--shadow);
-  /* transform: translateY(-4px); */
 }
 
-.project-col.collapsed {
-  max-height: 56px;
+/* スライドアニメーション用のラッパー */
+.project-collapsible-content {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.3s ease-out, opacity 0.2s;
   overflow: hidden;
+  flex: 1;
+}
+
+.project-collapsible-content > div,
+.project-collapsible-content > button {
+  min-height: 0;
+}
+
+.project-col.collapsed .project-collapsible-content {
+  grid-template-rows: 0fr;
+  opacity: 0;
 }
 
 .project-col.stopped {
@@ -159,15 +168,10 @@ body {
 }
 
 
-.project-col.collapsed .sort-controls,
-.project-col.collapsed .task-list,
-.project-col.collapsed .add-task-btn,
-.project-col.collapsed .task-count-badge {
-  display: none;
-}
-
+/* 折りたたみ時の挙動は grid-template-rows で制御するため display: none は不要 */
 .project-col.collapsed .project-header {
-  border-bottom: none;
+  border-bottom: 1px solid transparent;
+  transition: border-bottom 0.3s;
 }
 
 .project-col.sortable-ghost {

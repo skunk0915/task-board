@@ -187,11 +187,28 @@ function render() {
           }
           zone && zone.classList.remove('dp-drag-over');
           // 通常の並び替え
-          const ids   = [...listEl.querySelectorAll('.task-card')].map(el => el.dataset.tid);
           const store = ls.obj(LS.TASK_ORDER);
-          store[String(pid)] = ids;
+          const fullIds = store[String(pid)] || (project.tasks || []).map(t => String(t.id));
+          
+          // 現在表示されているIDのリストを取得
+          const visibleIds = [...listEl.querySelectorAll('.task-card')].map(el => el.dataset.tid);
+          
+          // 非表示（完了済みなど）のIDを抽出
+          const hiddenIds = fullIds.filter(id => !visibleIds.includes(id));
+          
+          // 表示されているIDを新しい順序で配置し、非表示のIDを元々の相対的な位置（または最後）に保持する
+          // ここでは単純に「新しい表示順 + 非表示分」とする。
+          // より正確には元々の非表示アイテムのインデックスを維持すべきだが、
+          // 完了タスクは通常下に固まるため、これで十分なことが多い。
+          const newOrder = [...visibleIds];
+          hiddenIds.forEach(id => {
+            // 元の場所に近い位置に挿入を試みる（簡易版）
+            newOrder.push(id); 
+          });
+          
+          store[String(pid)] = newOrder;
           ls.set(LS.TASK_ORDER, store);
-          api({ action: 'update_task_order', project_id: pid, order: ids }).catch(() => {});
+          api({ action: 'update_task_order', project_id: pid, order: newOrder }).catch(() => {});
         },
       });
     }
@@ -245,6 +262,7 @@ function buildProjectCol(project, tasks, mode) {
   const isStopped = project.status === 'stopped';
   const col = document.createElement('div');
   col.className   = 'project-col' + (collapsed ? ' collapsed' : '') + (isStopped ? ' stopped' : '');
+  col.id          = `project-${pid}`;
   col.dataset.pid = pid;
 
   const doneFilterBtn = doneCnt > 0
@@ -275,20 +293,22 @@ function buildProjectCol(project, tasks, mode) {
       </div>
     </div>
 
-    ${(!collapsed && (project.start_date || project.description)) ? `
-      <div class="project-meta-info">
-        ${project.start_date ? `<span class="project-start-date">📅 開始日: ${fmtDate(project.start_date)}</span>` : ''}
-        ${project.description ? `<div class="project-description">${esc(project.description)}</div>` : ''}
+    <div class="project-collapsible-content">
+      ${(project.start_date || project.description) ? `
+        <div class="project-meta-info">
+          ${project.start_date ? `<span class="project-start-date">📅 開始日: ${fmtDate(project.start_date)}</span>` : ''}
+          ${project.description ? `<div class="project-description">${esc(project.description)}</div>` : ''}
+        </div>
+      ` : ''}
+
+      <div class="task-list" id="tl-${pid}">
+        ${visibleTasks.length === 0
+          ? '<div class="task-empty">タスクなし</div>'
+          : visibleTasks.map(buildTaskCard).join('')}
       </div>
-    ` : ''}
 
-    <div class="task-list" id="tl-${pid}">
-      ${visibleTasks.length === 0
-        ? '<div class="task-empty">タスクなし</div>'
-        : visibleTasks.map(buildTaskCard).join('')}
+      <button class="add-task-btn add-task-btn-js" data-pid="${pid}">＋ タスク追加</button>
     </div>
-
-    <button class="add-task-btn add-task-btn-js" data-pid="${pid}">＋ タスク追加</button>
   `;
 
   // イベント委譲（列内）
@@ -413,9 +433,20 @@ function toggleAllHideDone() {
    ============================================================ */
 function toggleProjectCollapse(pid) {
   const map = ls.obj(LS.PROJECT_COLLAPSED);
-  map[String(pid)] = !map[String(pid)];
+  const isCollapsed = !map[String(pid)];
+  map[String(pid)] = isCollapsed;
   ls.set(LS.PROJECT_COLLAPSED, map);
-  render();
+  
+  // render() を呼ばずにクラス切り替えとアイコン更新を行う（アニメーション対応）
+  const el = document.getElementById(`project-${pid}`);
+  if (el) {
+    el.classList.toggle('collapsed', isCollapsed);
+    const btn = el.querySelector('.toggle-proj-btn');
+    if (btn) {
+      btn.textContent = isCollapsed ? '▼' : '▲';
+      btn.title = isCollapsed ? '展開' : '折りたたむ';
+    }
+  }
 }
 
 function toggleAllProjects() {
