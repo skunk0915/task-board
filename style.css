@@ -118,7 +118,6 @@ body {
   break-inside: avoid;
   /* カラムの途中で分割されないようにする */
   background: var(--surface);
-  border-radius: var(--radius);
   box-shadow: var(--shadow-sm);
   max-height: calc(100vh - var(--header-h) - 44px);
   border: 1px solid var(--border);
@@ -141,15 +140,24 @@ body {
   filter: grayscale(0.8);
 }
 
+/* 停止中のプロジェクト内ではホバー効果を無効化 */
 .project-col.stopped:hover {
-  opacity: 1;
-  filter: grayscale(0.4);
+  box-shadow: var(--shadow-sm);
+  transform: none;
+}
+
+.project-col.stopped .task-card:hover {
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border);
+  transform: none;
+  cursor: default;
 }
 
 .project-col.collapsed:hover {
   transform: none;
   box-shadow: var(--shadow-sm);
 }
+
 
 .project-col.collapsed .sort-controls,
 .project-col.collapsed .task-list,
@@ -169,7 +177,7 @@ body {
 .project-header {
   padding: 14px 14px 10px;
   border-bottom: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) 0 0;
+  /* border-radius: var(--radius) var(--radius) 0 0; */
   border-top: 3px solid;
   /* color set inline */
 }
@@ -826,7 +834,7 @@ body {
   margin: 0;
 }
 
-.status-opt input:checked + span {
+.status-opt input:checked+span {
   color: var(--accent);
   font-weight: 700;
 }
@@ -854,7 +862,7 @@ input[type="range"] {
   border-radius: 6px;
   overflow: hidden;
   display: flex;
-  box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .dp-bar-seg {
@@ -889,7 +897,6 @@ input[type="range"] {
   background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid;
-  border-radius: 6px;
   padding: 10px 12px;
   box-shadow: var(--shadow-sm);
   display: flex;
@@ -1199,7 +1206,6 @@ input[type="range"] {
   background: #f8f9fc;
   border: 1px solid var(--border);
   border-left: 3px solid var(--proj-color, var(--accent));
-  border-radius: 6px;
   padding: 5px 10px 5px 8px;
   font-size: 12px;
   cursor: grab;
